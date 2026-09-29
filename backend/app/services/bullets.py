@@ -1,11 +1,12 @@
 """
-Bullet improvement service — uses Claude API.
+Bullet improvement service — uses Groq API.
 Rules (PRD 6.2):
 - Never invents a number.
 - Prompts student if no metric is present.
 - Rejects first-person pronouns, passive voice, filler adjectives.
 - Rejects duplicate opening verbs.
 """
+import json
 import re
 from typing import Optional
 from groq import AsyncGroq
@@ -83,7 +84,7 @@ Rules you MUST follow:
 5. Remove all first-person pronouns (I, me, my, we).
 6. Avoid passive voice.
 7. Remove filler adjectives: passionate, hardworking, results-driven, dedicated, innovative, etc.
-8. Output ONLY the improved bullet text. No quotes, no explanations, no prefix like "Bullet:".
+8. Output ONLY the improved bullet text. No quotes, no explanations, no prefix like "Bullet:", no JSON, no markdown.
 9. Do not use em dashes (—). Use commas or semicolons instead.
 
 Context about the role/project may be provided to help you understand the domain."""
@@ -115,7 +116,7 @@ async def improve_bullet(raw_text: str, context: Optional[str] = None) -> Bullet
     try:
         response = await client.chat.completions.create(
             model=settings.GROQ_MODEL,
-            max_tokens=200,
+            max_tokens=400,
             temperature=0.3,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -123,6 +124,20 @@ async def improve_bullet(raw_text: str, context: Optional[str] = None) -> Bullet
             ],
         )
         improved = response.choices[0].message.content.strip()
+
+        # Some models wrap the answer in JSON despite instructions — unwrap it
+        if improved.startswith("{"):
+            try:
+                payload = json.loads(improved)
+                if isinstance(payload, dict):
+                    improved = str(
+                        payload.get("bullet")
+                        or payload.get("improved_text")
+                        or payload.get("text")
+                        or improved
+                    )
+            except (ValueError, TypeError):
+                pass
 
         # Hard validation: if improved text introduces a number not in original, strip it
         original_numbers = set(re.findall(r"\d+", raw_text))
