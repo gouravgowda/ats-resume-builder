@@ -8,7 +8,7 @@ Rules (PRD 6.2):
 """
 import re
 from typing import Optional
-import anthropic
+from groq import AsyncGroq
 from app.config import settings
 from app.schemas import BulletImproveResponse
 
@@ -90,7 +90,7 @@ Context about the role/project may be provided to help you understand the domain
 
 
 async def improve_bullet(raw_text: str, context: Optional[str] = None) -> BulletImproveResponse:
-    if not settings.ANTHROPIC_API_KEY:
+    if not settings.GROQ_API_KEY:
         # Fallback without API key: return flags only
         flags = detect_flags(raw_text)
         metric_present = has_metric(raw_text)
@@ -102,7 +102,7 @@ async def improve_bullet(raw_text: str, context: Optional[str] = None) -> Bullet
             flags=flags,
         )
 
-    client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+    client = AsyncGroq(api_key=settings.GROQ_API_KEY)
 
     user_message = f"Rewrite this resume bullet:\n{raw_text}"
     if context:
@@ -113,13 +113,16 @@ async def improve_bullet(raw_text: str, context: Optional[str] = None) -> Bullet
     metric_present = has_metric(raw_text)
 
     try:
-        response = await client.messages.create(
-            model="claude-3-5-haiku-20241022",
+        response = await client.chat.completions.create(
+            model=settings.GROQ_MODEL,
             max_tokens=200,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_message}],
+            temperature=0.3,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
         )
-        improved = response.content[0].text.strip()
+        improved = response.choices[0].message.content.strip()
 
         # Hard validation: if improved text introduces a number not in original, strip it
         original_numbers = set(re.findall(r"\d+", raw_text))
